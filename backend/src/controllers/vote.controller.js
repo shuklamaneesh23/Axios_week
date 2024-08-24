@@ -51,7 +51,7 @@ const downvoteQuestion = async (req, res) => {
 
 const upvoteAnswer = async (req, res) => {
     const { id } = req.params;
-    const { mail,answerId } = req.body;
+    const { mail, answerId } = req.body;
 
     const question = await Question.findById(id).exec();
     if (!question) {
@@ -80,7 +80,7 @@ const upvoteAnswer = async (req, res) => {
 
 const downvoteAnswer = async (req, res) => {
     const { id } = req.params;
-    const { mail,answerId } = req.body;
+    const { mail, answerId } = req.body;
 
     const question = await Question.findById(id).exec();
     if (!question) {
@@ -107,4 +107,72 @@ const downvoteAnswer = async (req, res) => {
     return res.status(200).json(question);
 };
 
-export { upvoteQuestion, downvoteQuestion, upvoteAnswer, downvoteAnswer };
+const getNetVotes = async (req,res) => {
+    const {authorEmail} = req.body;
+    const netVotes = await Question.aggregate([
+        // Step 1: Match questions authored by the user or containing answers authored by the user
+        {
+            $match: {
+                $or: [
+                    { authorEmail: authorEmail }, // Match user's questions
+                    { "answers.authorEmail": authorEmail } // Match user's answers
+                ]
+            }
+        },
+        // Step 2: Project the net votes (upvotes - downvotes) for both questions and answers
+        {
+            $project: {
+                netVotesFromQuestions: {
+                    $cond: [
+                        { $eq: ["$authorEmail", authorEmail] },
+                        { $subtract: ["$upvotes", "$downvotes"] },
+                        0
+                    ]
+                },
+                netVotesFromAnswers: {
+                    $reduce: {
+                        input: {
+                            $filter: {
+                                input: "$answers",
+                                as: "answer",
+                                cond: { $eq: ["$$answer.authorEmail", authorEmail] }
+                            }
+                        },
+                        initialValue: 0,
+                        in: { $add: ["$$value", { $subtract: ["$$this.upvotes", "$$this.downvotes"] }] }
+                    }
+                }
+            }
+        },
+        // Step 3: Sum the net votes from questions and answers
+        {
+            $group: {
+                _id: null,
+                totalNetVotes: { $sum: { $add: ["$netVotesFromQuestions", "$netVotesFromAnswers"] } }
+            }
+        }
+    ]);
+
+    // Return the total net votes, or 0 if no documents matched
+
+    //return netVotes.length > 0 ? netVotes[0].totalNetVotes : 0;
+    return res.status(200).json(netVotes.length > 0 ? netVotes[0].totalNetVotes : 0);
+};
+
+const getQuestionsAskedByUser = async (req,res) => {
+    const {authorEmail} = req.body;
+    const questions = await Question.find({
+        authorEmail:authorEmail
+    }).exec();
+    return res.status(200).json(questions);
+};
+
+const getAnswersByUser = async (req,res) => {
+    const {authorEmail} = req.body;
+    const questions = await Question.find({
+        "answers.authorEmail":authorEmail
+    }).exec();
+    return res.status(200).json(questions);
+};
+
+export { upvoteQuestion, downvoteQuestion, upvoteAnswer, downvoteAnswer,getNetVotes,getQuestionsAskedByUser,getAnswersByUser };
